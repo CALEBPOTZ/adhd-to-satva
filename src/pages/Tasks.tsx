@@ -98,6 +98,24 @@ export function Tasks() {
     await refetch()
   }, [currentUser, completions, refetch])
 
+  const handleUndo = useCallback(async (taskId: string) => {
+    if (!currentUser) return
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+    const completion = completions
+      .filter(c => c.task_id === taskId && new Date(c.completed_at) >= todayStart)
+      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime())[0]
+    if (!completion) return
+
+    await supabase.from('completions').delete().eq('id', completion.id)
+    await supabase.from('users').update({
+      total_xp: Math.max(0, (currentUser.total_xp || 0) - completion.xp_earned),
+      spendable_xp: Math.max(0, (currentUser.spendable_xp || 0) - completion.xp_earned),
+    }).eq('id', currentUser.id)
+
+    await refreshUser()
+    await refetch()
+  }, [currentUser, completions, refreshUser, refetch])
+
   return (
     <div className="space-y-4">
       <XpPopup events={xpEvents} />
@@ -166,6 +184,7 @@ export function Tasks() {
                           completedAt={getLastCompletion(task.id)}
                           onComplete={handleComplete}
                           onEditTime={handleEditTime}
+                        onUndo={handleUndo}
                           taskStreak={getTaskStreak(task, completions)}
                           decayMultiplier={getDecayMultiplier(task)}
                         />

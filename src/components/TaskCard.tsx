@@ -11,6 +11,7 @@ interface TaskCardProps {
   completedAt?: Date | null
   onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => void
   onEditTime?: (taskId: string, newTime: Date) => void
+  onUndo?: (taskId: string) => void
   taskStreak?: number
   decayMultiplier?: number
 }
@@ -39,7 +40,7 @@ const RECURRING_LABELS: Record<string, string> = {
   anytime: 'As needed',
 }
 
-export function TaskCard({ task, completed, completedAt, onComplete, onEditTime, taskStreak = 0, decayMultiplier = 1 }: TaskCardProps) {
+export function TaskCard({ task, completed, completedAt, onComplete, onEditTime, onUndo, taskStreak = 0, decayMultiplier = 1 }: TaskCardProps) {
   const [showTimer, setShowTimer] = useState(false)
   const [showTimePicker, setShowTimePicker] = useState(false)
   const [showEditTime, setShowEditTime] = useState(false)
@@ -103,6 +104,15 @@ export function TaskCard({ task, completed, completedAt, onComplete, onEditTime,
               )}
             </div>
           </div>
+          {onUndo && (
+            <button
+              onClick={() => onUndo(task.id)}
+              className="text-red-400/40 text-xs px-2 py-1 rounded-lg
+                         active:bg-red-500/10 active:text-red-400 transition-colors"
+            >
+              ↩
+            </button>
+          )}
           {onEditTime && (
             <button
               onClick={() => setShowEditTime(true)}

@@ -7,8 +7,8 @@ import { playComplete } from '../lib/sounds'
 import { fireBigConfetti } from './Confetti'
 import type { SadhanaLog } from '../types'
 
-const JAPA_BASE_XP = 20 // Base for 16 rounds — low because it's already a habit
-const JAPA_EXTRA_ROUND_XP = 15 // Each round beyond 16
+const JAPA_BASE_XP = 20
+const JAPA_EXTRA_ROUND_XP = 15
 const BASE_XP = {
   reading: 3,
   arti_puja: 30,
@@ -17,14 +17,20 @@ const BASE_XP = {
   class: 3,
 }
 
-export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) => void }) {
+interface Props {
+  onXpEarned: (amount: number) => void
+  date?: string // ISO date string, defaults to today
+}
+
+export function SadhanaTracker({ onXpEarned, date: dateProp }: Props) {
   const { currentUser, refreshUser } = useUser()
   const [log, setLog] = useState<SadhanaLog | null>(null)
   const [readingInput, setReadingInput] = useState('')
   const [classInput, setClassInput] = useState('')
   const [extraRoundsInput, setExtraRoundsInput] = useState('')
 
-  const today = new Date().toISOString().split('T')[0]
+  const date = dateProp || new Date().toISOString().split('T')[0]
+  const isToday = date === new Date().toISOString().split('T')[0]
 
   const fetchLog = useCallback(async () => {
     if (!currentUser) return
@@ -32,19 +38,35 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
       .from('sadhana_log')
       .select('*')
       .eq('user_id', currentUser.id)
-      .eq('date', today)
+      .eq('date', date)
       .maybeSingle()
     setLog(data || null)
-  }, [currentUser, today])
+  }, [currentUser, date])
 
   useEffect(() => { fetchLog() }, [fetchLog])
 
-  const upsertLog = useCallback(async (updates: Partial<SadhanaLog>, xpAmount: number) => {
+  const updateXp = useCallback(async (xpDelta: number) => {
+    if (!currentUser || xpDelta === 0) return
+    await supabase
+      .from('users')
+      .update({
+        total_xp: Math.max(0, (currentUser.total_xp || 0) + xpDelta),
+        spendable_xp: Math.max(0, (currentUser.spendable_xp || 0) + xpDelta),
+      })
+      .eq('id', currentUser.id)
+    if (xpDelta > 0) {
+      playComplete()
+      onXpEarned(xpDelta)
+    }
+    await refreshUser()
+  }, [currentUser, onXpEarned, refreshUser])
+
+  const upsertLog = useCallback(async (updates: Partial<SadhanaLog>, xpDelta: number) => {
     if (!currentUser) return
 
     const payload: Record<string, unknown> = {
       user_id: currentUser.id,
-      date: today,
+      date,
       japa_completed_at: log?.japa_completed_at || null,
       japa_rounds: log?.japa_rounds || 0,
       reading_minutes: log?.reading_minutes || 0,
@@ -52,7 +74,7 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
       flower_offering: log?.flower_offering || false,
       offering_plate: log?.offering_plate || false,
       class_minutes: log?.class_minutes || 0,
-      xp_earned: (log?.xp_earned || 0) + xpAmount,
+      xp_earned: Math.max(0, (log?.xp_earned || 0) + xpDelta),
       ...updates,
     }
 
@@ -62,74 +84,74 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
       .select()
       .single()
 
-    if (error) {
-      console.error('Sadhana upsert error:', error)
-      return
-    }
+    if (error) { console.error('Sadhana upsert error:', error); return }
     if (data) setLog(data)
+    await updateXp(xpDelta)
+  }, [currentUser, log, date, updateXp])
 
-    if (xpAmount > 0) {
-      await supabase
-        .from('users')
-        .update({
-          total_xp: (currentUser.total_xp || 0) + xpAmount,
-          spendable_xp: (currentUser.spendable_xp || 0) + xpAmount,
-        })
-        .eq('id', currentUser.id)
-      playComplete()
-      onXpEarned(xpAmount)
-      await refreshUser()
-    }
-  }, [currentUser, log, today, onXpEarned, refreshUser])
-
-  // Complete 16 rounds
+  // === JAPA ===
   const completeJapa = useCallback(async () => {
     const now = new Date()
     const multiplier = getJapaMultiplier(now)
-    const xp = Math.round(JAPA_BASE_XP * multiplier * (currentUser?.current_streak || 1))
-    await upsertLog({
-      japa_rounds: 16,
-      japa_completed_at: now.toISOString(),
-    }, xp)
+    const xp = Math.round(JAPA_BASE_XP * multiplier * Math.max(1, currentUser?.current_streak || 1))
+    await upsertLog({ japa_rounds: 16, japa_completed_at: now.toISOString() }, xp)
     fireBigConfetti()
   }, [currentUser, upsertLog])
 
-  // Log extra rounds beyond 16
+  const undoJapa = useCallback(async () => {
+    if (!log || log.japa_rounds === 0) return
+    // Reverse all japa XP earned today
+    const japaXpToRemove = log.japa_completed_at
+      ? Math.round(JAPA_BASE_XP * getJapaMultiplier(new Date(log.japa_completed_at)) * Math.max(1, currentUser?.current_streak || 1))
+      : JAPA_BASE_XP
+    const extraXp = Math.max(0, log.japa_rounds - 16) * JAPA_EXTRA_ROUND_XP
+    await upsertLog({ japa_rounds: 0, japa_completed_at: null }, -(japaXpToRemove + extraXp))
+  }, [log, currentUser, upsertLog])
+
   const logExtraRounds = useCallback(async () => {
     const extra = parseInt(extraRoundsInput) || 0
     if (extra <= 0) return
     const now = new Date()
     const multiplier = getJapaMultiplier(now)
-    const currentRounds = log?.japa_rounds || 16
     const xp = Math.round(extra * JAPA_EXTRA_ROUND_XP * multiplier)
-    await upsertLog({
-      japa_rounds: currentRounds + extra,
-      japa_completed_at: now.toISOString(),
-    }, xp)
+    await upsertLog({ japa_rounds: (log?.japa_rounds || 16) + extra, japa_completed_at: now.toISOString() }, xp)
     setExtraRoundsInput('')
   }, [extraRoundsInput, log, upsertLog])
 
+  // === TOGGLES ===
   const toggleBoolean = useCallback(async (field: 'arti_puja' | 'flower_offering' | 'offering_plate') => {
     const current = log?.[field] || false
     const xpMap = { arti_puja: BASE_XP.arti_puja, flower_offering: BASE_XP.flower_offering, offering_plate: BASE_XP.offering_plate }
-    await upsertLog({ [field]: !current }, current ? 0 : xpMap[field])
+    const xp = current ? -xpMap[field] : xpMap[field]
+    await upsertLog({ [field]: !current }, xp)
   }, [log, upsertLog])
 
+  // === READING & CLASS ===
   const logReading = useCallback(async () => {
     const mins = parseInt(readingInput) || 0
     if (mins <= 0) return
-    const totalMins = (log?.reading_minutes || 0) + mins
-    await upsertLog({ reading_minutes: totalMins }, mins * BASE_XP.reading)
+    await upsertLog({ reading_minutes: (log?.reading_minutes || 0) + mins }, mins * BASE_XP.reading)
     setReadingInput('')
   }, [readingInput, log, upsertLog])
+
+  const undoReading = useCallback(async () => {
+    if (!log || !log.reading_minutes) return
+    const xpToRemove = log.reading_minutes * BASE_XP.reading
+    await upsertLog({ reading_minutes: 0 }, -xpToRemove)
+  }, [log, upsertLog])
 
   const logClass = useCallback(async () => {
     const mins = parseInt(classInput) || 0
     if (mins <= 0) return
-    const totalMins = (log?.class_minutes || 0) + mins
-    await upsertLog({ class_minutes: totalMins }, mins * BASE_XP.class)
+    await upsertLog({ class_minutes: (log?.class_minutes || 0) + mins }, mins * BASE_XP.class)
     setClassInput('')
   }, [classInput, log, upsertLog])
+
+  const undoClass = useCallback(async () => {
+    if (!log || !log.class_minutes) return
+    const xpToRemove = log.class_minutes * BASE_XP.class
+    await upsertLog({ class_minutes: 0 }, -xpToRemove)
+  }, [log, upsertLog])
 
   const now = new Date()
   const currentHour = now.getHours() + now.getMinutes() / 60
@@ -139,49 +161,53 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
 
   return (
     <div className="space-y-3">
-      <h2 className="text-sadhana font-bold text-lg flex items-center gap-2">
-        🙏 Sadhana
-        {log && <span className="text-xs text-text-dim font-normal">Today: +{log.xp_earned} XP</span>}
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sadhana font-bold text-lg">
+          🙏 Sadhana {!isToday && <span className="text-xs text-text-dim font-normal">({date})</span>}
+        </h2>
+        {log && <span className="text-xs text-text-dim">+{log.xp_earned} XP</span>}
+      </div>
 
-      {/* Japa — 16 rounds, one button */}
+      {/* Japa */}
       <div className={`bg-bg-card border rounded-xl p-4 ${japaDone ? 'border-success/30 bg-success/5' : 'border-sadhana/20'}`}>
         <div className="text-center">
           <div className="font-medium mb-1">Japa — 16 Rounds</div>
 
           {!japaDone ? (
             <>
-              {/* Time bonus indicator */}
-              <div className="mb-3">
-                <span className={`text-sm font-bold ${japaTime.color}`}>{japaTime.label}</span>
-                <div className="text-text-dim text-xs mt-1">Earlier = exponentially more XP</div>
-              </div>
+              {isToday && (
+                <div className="mb-3">
+                  <span className={`text-sm font-bold ${japaTime.color}`}>{japaTime.label}</span>
+                  <div className="text-text-dim text-xs mt-1">Earlier = exponentially more XP</div>
+                </div>
+              )}
 
-              {/* Time bonus tiers */}
-              <div className="flex justify-center gap-1 mb-4 text-xs">
-                {[
-                  { label: '<5am', mult: '5x', active: currentHour < 5 },
-                  { label: '<6am', mult: '3.5x', active: currentHour < 6 },
-                  { label: '<7am', mult: '2.5x', active: currentHour < 7 },
-                  { label: '<8am', mult: '1.5x', active: currentHour < 8 },
-                  { label: '8am+', mult: '1x', active: true },
-                ].map((tier, i) => (
-                  <div
-                    key={i}
-                    className={`px-2 py-1 rounded-lg ${
-                      tier.active && (i === 0 || currentHour >= [0, 5, 6, 7, 8][i])
-                        ? i === 0 && currentHour < 5 ? 'bg-accent-glow/20 text-accent-glow font-bold'
-                        : i === 1 && currentHour < 6 ? 'bg-accent/20 text-accent font-bold'
-                        : i === 2 && currentHour < 7 ? 'bg-sadhana/20 text-sadhana font-bold'
-                        : i === 3 && currentHour < 8 ? 'bg-success/20 text-success font-bold'
-                        : 'bg-bg-elevated text-text-dim/50'
-                        : 'bg-bg-elevated text-text-dim/30 line-through'
-                    }`}
-                  >
-                    {tier.label} {tier.mult}
-                  </div>
-                ))}
-              </div>
+              {isToday && (
+                <div className="flex justify-center gap-1 mb-4 text-xs">
+                  {[
+                    { label: '<5am', mult: '5x', active: currentHour < 5 },
+                    { label: '<6am', mult: '3.5x', active: currentHour < 6 },
+                    { label: '<7am', mult: '2.5x', active: currentHour < 7 },
+                    { label: '<8am', mult: '1.5x', active: currentHour < 8 },
+                    { label: '8am+', mult: '1x', active: true },
+                  ].map((tier, i) => (
+                    <div
+                      key={i}
+                      className={`px-2 py-1 rounded-lg ${
+                        tier.active && (i === 0 || currentHour >= [0, 5, 6, 7, 8][i])
+                          ? i === 0 && currentHour < 5 ? 'bg-accent-glow/20 text-accent-glow font-bold'
+                          : i === 1 && currentHour < 6 ? 'bg-accent/20 text-accent font-bold'
+                          : i === 2 && currentHour < 7 ? 'bg-sadhana/20 text-sadhana font-bold'
+                          : i === 3 && currentHour < 8 ? 'bg-success/20 text-success font-bold'
+                          : 'bg-bg-elevated text-text-dim/50'
+                          : 'bg-bg-elevated text-text-dim/30 line-through'
+                      }`}
+                    >
+                      {tier.label} {tier.mult}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <motion.button
                 whileTap={{ scale: 0.95 }}
@@ -197,8 +223,8 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
             <>
               <div className="text-success font-bold text-lg mb-1">✅ 16 Rounds Done!</div>
               {log?.japa_completed_at && (
-                <div className="text-text-dim text-sm mb-3">
-                  Completed at {new Date(log.japa_completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <div className="text-text-dim text-sm mb-2">
+                  at {new Date(log.japa_completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   {' '}— {getJapaTimeLabel(new Date(log.japa_completed_at).getHours()).label}
                 </div>
               )}
@@ -206,7 +232,6 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
                 <div className="text-accent font-bold mb-2">+{japaRounds - 16} extra rounds!</div>
               )}
 
-              {/* Extra rounds */}
               <div className="flex gap-2 mt-2">
                 <input
                   type="number"
@@ -225,12 +250,19 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
                   + Extra
                 </button>
               </div>
+
+              <button
+                onClick={undoJapa}
+                className="mt-2 text-red-400/60 text-xs w-full active:text-red-400"
+              >
+                ↩ Undo japa
+              </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Toggle items */}
+      {/* Toggle items — tap to toggle (acts as undo too) */}
       {[
         { field: 'arti_puja' as const, label: 'Arti / Puja', icon: '🪔', xp: BASE_XP.arti_puja },
         { field: 'flower_offering' as const, label: 'Pick & Offer Flowers', icon: '🌸', xp: BASE_XP.flower_offering },
@@ -245,7 +277,9 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
         >
           <span className="text-xl">{log?.[item.field] ? '✅' : item.icon}</span>
           <span className={log?.[item.field] ? 'text-success' : ''}>{item.label}</span>
-          <span className="ml-auto text-xs text-xp font-mono">+{item.xp} XP</span>
+          <span className="ml-auto text-xs text-xp font-mono">
+            {log?.[item.field] ? `✓ ${item.xp}` : `+${item.xp}`} XP
+          </span>
         </motion.button>
       ))}
 
@@ -254,26 +288,21 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
         <div className="flex items-center justify-between mb-2">
           <div className="font-medium">📖 Reading</div>
           {(log?.reading_minutes || 0) > 0 && (
-            <span className="text-xs text-success font-mono bg-success/10 px-2 py-0.5 rounded-full">
-              {log?.reading_minutes} min (+{(log?.reading_minutes || 0) * BASE_XP.reading} XP)
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-success font-mono bg-success/10 px-2 py-0.5 rounded-full">
+                {log?.reading_minutes} min (+{(log?.reading_minutes || 0) * BASE_XP.reading} XP)
+              </span>
+              <button onClick={undoReading} className="text-red-400/50 text-xs active:text-red-400">↩</button>
+            </div>
           )}
         </div>
         <div className="flex gap-2">
-          <input
-            type="number"
-            inputMode="numeric"
-            value={readingInput}
-            onChange={e => setReadingInput(e.target.value)}
-            placeholder="Minutes read"
+          <input type="number" inputMode="numeric" value={readingInput}
+            onChange={e => setReadingInput(e.target.value)} placeholder="Minutes"
             className="flex-1 bg-bg-elevated border border-bg-elevated rounded-lg px-3 py-2 text-text
-                       focus:border-sadhana/50 outline-none text-center text-lg"
-          />
-          <button
-            onClick={logReading}
-            className="bg-sadhana/20 text-sadhana px-5 py-2 rounded-lg font-bold
-                       active:scale-95 transition-transform"
-          >
+                       focus:border-sadhana/50 outline-none text-center text-lg" />
+          <button onClick={logReading}
+            className="bg-sadhana/20 text-sadhana px-5 py-2 rounded-lg font-bold active:scale-95 transition-transform">
             + Log
           </button>
         </div>
@@ -284,26 +313,21 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
         <div className="flex items-center justify-between mb-2">
           <div className="font-medium">🎧 Listen to Class</div>
           {(log?.class_minutes || 0) > 0 && (
-            <span className="text-xs text-success font-mono bg-success/10 px-2 py-0.5 rounded-full">
-              {log?.class_minutes} min (+{(log?.class_minutes || 0) * BASE_XP.class} XP)
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-success font-mono bg-success/10 px-2 py-0.5 rounded-full">
+                {log?.class_minutes} min (+{(log?.class_minutes || 0) * BASE_XP.class} XP)
+              </span>
+              <button onClick={undoClass} className="text-red-400/50 text-xs active:text-red-400">↩</button>
+            </div>
           )}
         </div>
         <div className="flex gap-2">
-          <input
-            type="number"
-            inputMode="numeric"
-            value={classInput}
-            onChange={e => setClassInput(e.target.value)}
-            placeholder="Minutes listened"
+          <input type="number" inputMode="numeric" value={classInput}
+            onChange={e => setClassInput(e.target.value)} placeholder="Minutes"
             className="flex-1 bg-bg-elevated border border-bg-elevated rounded-lg px-3 py-2 text-text
-                       focus:border-sadhana/50 outline-none text-center text-lg"
-          />
-          <button
-            onClick={logClass}
-            className="bg-sadhana/20 text-sadhana px-5 py-2 rounded-lg font-bold
-                       active:scale-95 transition-transform"
-          >
+                       focus:border-sadhana/50 outline-none text-center text-lg" />
+          <button onClick={logClass}
+            className="bg-sadhana/20 text-sadhana px-5 py-2 rounded-lg font-bold active:scale-95 transition-transform">
             + Log
           </button>
         </div>
