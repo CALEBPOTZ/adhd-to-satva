@@ -72,7 +72,7 @@ export function getTaskPriority(task: Task, tasks: Task[], completions: Completi
   let score = 0
 
   // 1. Decay urgency — tasks losing XP get higher priority
-  const decay = getDecayMultiplier(task)
+  const decay = getDecayMultiplier(task, completions.some(c => c.task_id === task.id))
   score += (1 - decay) * 50 // 0-50 points for decay urgency
 
   // 2. Dependency chains — next step in a chain gets boosted

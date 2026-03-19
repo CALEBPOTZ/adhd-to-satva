@@ -40,7 +40,7 @@ export function Dashboard() {
     const comboMult = registerCompletion()
     const taskStreak = getTaskStreak(task, completions)
     const taskStreakMult = getTaskStreakMultiplier(taskStreak, task.recurring)
-    const decayMult = getDecayMultiplier(task)
+    const decayMult = getDecayMultiplier(task, completions.some(c => c.task_id === task.id))
 
     const xpEarned = calculateXp(
       task.xp_reward, task.difficulty, currentUser.current_streak,
@@ -150,7 +150,7 @@ export function Dashboard() {
             onEditTime={handleEditTime}
             onUndo={handleUndo}
             taskStreak={getTaskStreak(task, completions)}
-            decayMultiplier={getDecayMultiplier(task)}
+            decayMultiplier={getDecayMultiplier(task, completions.some(c => c.task_id === task.id))}
           />
         ))}
       </div>

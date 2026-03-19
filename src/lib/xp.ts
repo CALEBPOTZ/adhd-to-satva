@@ -183,12 +183,16 @@ export function getTaskStreakMultiplier(taskStreak: number, recurring: string | 
 // - 'evening': no decay — meant for nighttime
 // - 'flexible': no decay — any time is fine
 // ============================================================
-export function getDecayMultiplier(task: Task): number {
+export function getDecayMultiplier(task: Task, hasBeenCompletedBefore: boolean = true): number {
   const decayType = task.decay_type || 'early'
 
   // Evening and flexible tasks: always full XP
   if (decayType === 'evening' || decayType === 'flexible') return 1
   if (!task.recurring || task.recurring === 'anytime') return 1
+
+  // No decay until the task has been completed at least once
+  // First time doing a chore = full XP, decay starts from the second period onward
+  if (!hasBeenCompletedBefore) return 1
 
   const now = new Date()
   const startHour = task.decay_start_hour ?? 6
