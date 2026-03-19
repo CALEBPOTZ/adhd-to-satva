@@ -159,8 +159,8 @@ export function checkNeglected(tasks: Task[], completions: Completion[]) {
     if (alreadySent(notifKey)) continue
 
     sendNotification(
-      `⚠️ Don't forget: ${task.title}`,
-      `${urgency} — ${task.xp_reward} XP waiting for you!`,
+      `⚡ ${task.xp_reward} XP waiting: ${task.title}`,
+      `${urgency} — grab it before the bonus drops!`,
       notifKey,
     )
     markSent(notifKey)
@@ -192,4 +192,45 @@ export async function runNotificationChecks(userId: string) {
 
   checkNewlyAvailable(tasks, completions)
   checkNeglected(tasks, completions)
+  checkMorningMotivation(userId)
 }
+
+// ============================================================
+// Morning motivation notifications — positive framing only
+// ============================================================
+function checkMorningMotivation(_userId: string) {
+  const now = new Date()
+  const hour = now.getHours()
+  const today = now.toISOString().split('T')[0]
+
+  // 4:30am — Japa reminder (positive)
+  if (hour >= 4 && hour < 5) {
+    const key = `morning_japa_${today}`
+    if (!alreadySent(key)) {
+      sendNotification(
+        '🙏 Your japa is worth 5x right now!',
+        'Complete 16 rounds before 5am for maximum XP. You got this!',
+        key,
+      )
+      markSent(key)
+    }
+  }
+
+  // 7am — Morning kickstart
+  if (hour >= 7 && hour < 8) {
+    const key = `morning_start_${today}`
+    if (!alreadySent(key)) {
+      sendNotification(
+        '⚡ Ready to crush today?',
+        'Open the app, hit Just Start, and earn your first XP!',
+        key,
+      )
+      markSent(key)
+    }
+  }
+
+  // Reframe neglected task notifications — positive urgency, not guilt
+}
+
+// Reframe: change neglect notifications to positive
+
