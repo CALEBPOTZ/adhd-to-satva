@@ -95,8 +95,13 @@ export function Profile() {
         </motion.div>
         <div className="text-xl font-bold">{currentUser.name}</div>
         <div className="text-sadhana text-sm">{getLevelName(currentUser.level)}</div>
-        <div className="text-xp font-mono mt-1">{(currentUser.total_xp || 0).toLocaleString()} Total XP</div>
-        <div className="text-accent font-mono text-sm">{(currentUser.spendable_xp || 0).toLocaleString()} Spendable</div>
+        <div className="text-xp font-mono text-2xl mt-2">{(currentUser.total_xp || 0).toLocaleString()} XP</div>
+        <div className="text-accent font-mono text-sm mt-1">
+          {(currentUser.spendable_xp || 0).toLocaleString()} spendable
+        </div>
+        <div className="text-text-dim text-xs mt-1">
+          Level {currentUser.level} • {currentUser.current_streak || 0} day streak
+        </div>
       </div>
 
       <LevelBar />
