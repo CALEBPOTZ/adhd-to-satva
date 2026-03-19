@@ -1,15 +1,18 @@
 import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { Task } from '../types'
+import type { Task, Completion } from '../types'
 import { Timer } from './Timer'
 import { playJustStart } from '../lib/sounds'
+import { getTaskPriority, getChainInfo } from '../lib/priority'
 
 interface JustStartButtonProps {
   tasks: Task[]
+  allTasks: Task[]
+  completions: Completion[]
   onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number) => void
 }
 
-export function JustStartButton({ tasks, onComplete }: JustStartButtonProps) {
+export function JustStartButton({ tasks, allTasks, completions, onComplete }: JustStartButtonProps) {
   const [active, setActive] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [currentStep, setCurrentStep] = useState(0)
@@ -17,15 +20,29 @@ export function JustStartButton({ tasks, onComplete }: JustStartButtonProps) {
 
   const pickTask = useCallback(() => {
     if (tasks.length === 0) return
-    // Pick easiest task (lowest difficulty), random among ties
-    const sorted = [...tasks].sort((a, b) => a.difficulty - b.difficulty)
-    const easiest = sorted.filter(t => t.difficulty === sorted[0].difficulty)
-    const picked = easiest[Math.floor(Math.random() * easiest.length)]
-    setSelectedTask(picked)
+
+    // Score every task by priority
+    const scored = tasks.map(t => ({
+      task: t,
+      priority: getTaskPriority(t, allTasks, completions),
+    }))
+
+    // Filter out blocked tasks (negative priority)
+    const available = scored.filter(s => s.priority > -50)
+    if (available.length === 0) return
+
+    // Sort by priority descending
+    available.sort((a, b) => b.priority - a.priority)
+
+    // Pick from top 3 (slight randomness so it doesn't feel robotic)
+    const topN = available.slice(0, Math.min(3, available.length))
+    const picked = topN[Math.floor(Math.random() * topN.length)]
+
+    setSelectedTask(picked.task)
     setCurrentStep(0)
     setActive(true)
     playJustStart()
-  }, [tasks])
+  }, [tasks, allTasks, completions])
 
   const handleTimerComplete = useCallback(() => {
     if (!selectedTask) return
@@ -33,10 +50,6 @@ export function JustStartButton({ tasks, onComplete }: JustStartButtonProps) {
     setActive(false)
     onComplete(selectedTask.id, true, 300)
   }, [selectedTask, onComplete])
-
-  const handleSkipToTimer = useCallback(() => {
-    setShowTimer(true)
-  }, [])
 
   const handleDone = useCallback(() => {
     if (!selectedTask) return
@@ -52,6 +65,8 @@ export function JustStartButton({ tasks, onComplete }: JustStartButtonProps) {
       </div>
     )
   }
+
+  const chain = selectedTask ? getChainInfo(selectedTask) : null
 
   return (
     <>
@@ -95,6 +110,11 @@ export function JustStartButton({ tasks, onComplete }: JustStartButtonProps) {
             className="bg-bg-card border border-accent/30 rounded-2xl p-6"
           >
             <div className="text-accent text-sm font-bold mb-1">YOUR MISSION:</div>
+            {chain && (
+              <div className="text-xs text-text-dim mb-1">
+                🔗 {chain.chainName} — step {chain.step}/{chain.total}
+              </div>
+            )}
             <div className="text-xl font-bold mb-4">{selectedTask.title}</div>
 
             {selectedTask.micro_steps && selectedTask.micro_steps.length > 0 ? (
@@ -125,7 +145,7 @@ export function JustStartButton({ tasks, onComplete }: JustStartButtonProps) {
 
             <div className="flex gap-3">
               <button
-                onClick={handleSkipToTimer}
+                onClick={() => setShowTimer(true)}
                 className="flex-1 bg-streak/20 text-streak font-bold py-3 rounded-xl
                            active:scale-95 transition-transform"
               >

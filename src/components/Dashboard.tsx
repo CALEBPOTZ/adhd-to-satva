@@ -118,7 +118,7 @@ export function Dashboard() {
 
       <LevelBar />
       <StreakFire />
-      <JustStartButton tasks={uncompleted} onComplete={handleComplete} />
+      <JustStartButton tasks={uncompleted} allTasks={tasks} completions={completions} onComplete={handleComplete} />
 
       <div className="space-y-2">
         <h2 className="text-lg font-bold">📋 Today's Quests</h2>
