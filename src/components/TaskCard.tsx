@@ -2,12 +2,15 @@ import { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import type { Task } from '../types'
 import { Timer } from './Timer'
-import { daysUntilNextPeriod, getPeriodLabel } from '../lib/periods'
+import { TimePicker } from './TimePicker'
+import { daysUntilNextPeriod } from '../lib/periods'
 
 interface TaskCardProps {
   task: Task
   completed: boolean
-  onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number) => void
+  completedAt?: Date | null
+  onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => void
+  onEditTime?: (taskId: string, newTime: Date) => void
   taskStreak?: number
   decayMultiplier?: number
 }
@@ -36,8 +39,10 @@ const RECURRING_LABELS: Record<string, string> = {
   anytime: 'As needed',
 }
 
-export function TaskCard({ task, completed, onComplete, taskStreak = 0, decayMultiplier = 1 }: TaskCardProps) {
+export function TaskCard({ task, completed, completedAt, onComplete, onEditTime, taskStreak = 0, decayMultiplier = 1 }: TaskCardProps) {
   const [showTimer, setShowTimer] = useState(false)
+  const [showTimePicker, setShowTimePicker] = useState(false)
+  const [showEditTime, setShowEditTime] = useState(false)
   const [expanded, setExpanded] = useState(false)
 
   const timerSeconds = (task.icnu_config as Record<string, number>)?.timer_seconds || 300
@@ -46,34 +51,70 @@ export function TaskCard({ task, completed, onComplete, taskStreak = 0, decayMul
     onComplete(task.id, false)
   }, [task.id, onComplete])
 
+  const handleCompleteAtTime = useCallback((time: Date) => {
+    setShowTimePicker(false)
+    onComplete(task.id, false, undefined, time)
+  }, [task.id, onComplete])
+
   const handleTimerComplete = useCallback(() => {
     setShowTimer(false)
     onComplete(task.id, true, timerSeconds)
   }, [task.id, timerSeconds, onComplete])
 
-  // Completed state — locked until next period
+  const handleEditTime = useCallback((time: Date) => {
+    setShowEditTime(false)
+    onEditTime?.(task.id, time)
+  }, [task.id, onEditTime])
+
+  // Completed state
   if (completed) {
     const daysLeft = daysUntilNextPeriod(task.recurring)
-    const periodLabel = getPeriodLabel(task.recurring)
     const isNonDaily = task.recurring && task.recurring !== 'daily' && task.recurring !== 'anytime'
+    const timeStr = completedAt
+      ? new Date(completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : null
 
     return (
-      <motion.div
-        initial={{ opacity: 1 }}
-        animate={{ opacity: 0.5 }}
-        className="bg-bg-card/50 rounded-xl p-3 border border-success/20 flex items-center gap-3"
-      >
-        <span className="text-success text-xl">✅</span>
-        <div className="flex-1 min-w-0">
-          <span className="text-text-dim line-through text-sm">{task.title}</span>
-          {isNonDaily && daysLeft > 0 && (
-            <div className="text-xs text-text-dim/60 mt-0.5">
-              🔒 Done {periodLabel} — unlocks in {daysLeft} day{daysLeft !== 1 ? 's' : ''}
+      <>
+        {showEditTime && (
+          <TimePicker
+            title={task.title}
+            initialTime={completedAt || undefined}
+            onConfirm={handleEditTime}
+            onCancel={() => setShowEditTime(false)}
+          />
+        )}
+        <motion.div
+          initial={{ opacity: 1 }}
+          animate={{ opacity: 0.5 }}
+          className="bg-bg-card/50 rounded-xl p-3 border border-success/20 flex items-center gap-3"
+        >
+          <span className="text-success text-xl">✅</span>
+          <div className="flex-1 min-w-0">
+            <span className="text-text-dim line-through text-sm">{task.title}</span>
+            <div className="flex items-center gap-2 mt-0.5">
+              {timeStr && (
+                <span className="text-xs text-text-dim/60">at {timeStr}</span>
+              )}
+              {isNonDaily && daysLeft > 0 && (
+                <span className="text-xs text-text-dim/60">
+                  🔒 unlocks in {daysLeft}d
+                </span>
+              )}
             </div>
+          </div>
+          {onEditTime && (
+            <button
+              onClick={() => setShowEditTime(true)}
+              className="text-text-dim/40 text-xs px-2 py-1 rounded-lg
+                         active:bg-bg-elevated active:text-text-dim transition-colors"
+            >
+              ✏️
+            </button>
           )}
-        </div>
-        <span className="ml-auto text-success/60 text-xs font-mono">+{task.xp_reward} XP</span>
-      </motion.div>
+          <span className="text-success/60 text-xs font-mono">+{task.xp_reward}</span>
+        </motion.div>
+      </>
     )
   }
 
@@ -85,6 +126,13 @@ export function TaskCard({ task, completed, onComplete, taskStreak = 0, decayMul
           onComplete={handleTimerComplete}
           onCancel={() => setShowTimer(false)}
           taskTitle={task.title}
+        />
+      )}
+      {showTimePicker && (
+        <TimePicker
+          title={task.title}
+          onConfirm={handleCompleteAtTime}
+          onCancel={() => setShowTimePicker(false)}
         />
       )}
       <motion.div
@@ -111,26 +159,24 @@ export function TaskCard({ task, completed, onComplete, taskStreak = 0, decayMul
                 </span>
               )}
               <span className="text-xs text-xp font-mono">+{task.xp_reward} XP</span>
-              {/* Per-task streak badge */}
               {taskStreak >= 2 && (
                 <span className="text-xs bg-streak/20 text-streak px-2 py-0.5 rounded-full font-bold">
                   🔥 {taskStreak}x streak
                 </span>
               )}
-              {/* Decay indicator */}
               {decayMultiplier < 1 && decayMultiplier >= 0.8 && (
                 <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full font-bold">
-                  ⏰ {Math.round(decayMultiplier * 100)}% — do it now!
+                  ⏰ {Math.round(decayMultiplier * 100)}%
                 </span>
               )}
               {decayMultiplier < 0.8 && decayMultiplier >= 0.6 && (
                 <span className="text-xs bg-streak/20 text-streak px-2 py-0.5 rounded-full font-bold">
-                  📉 {Math.round(decayMultiplier * 100)}% — losing XP!
+                  📉 {Math.round(decayMultiplier * 100)}%
                 </span>
               )}
               {decayMultiplier < 0.6 && (
                 <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-bold animate-pulse">
-                  🚨 {Math.round(decayMultiplier * 100)}% — hurry!
+                  🚨 {Math.round(decayMultiplier * 100)}%
                 </span>
               )}
               {task.difficulty > 1 && (
@@ -138,18 +184,27 @@ export function TaskCard({ task, completed, onComplete, taskStreak = 0, decayMul
               )}
             </div>
           </div>
-          {task.icnu_type === 'urgency' && (
+          <div className="flex flex-col gap-1">
+            {task.icnu_type === 'urgency' && (
+              <button
+                onClick={() => setShowTimer(true)}
+                className="bg-streak/20 text-streak px-3 py-1.5 rounded-lg text-sm font-bold
+                           active:scale-95 transition-transform"
+              >
+                ⏱️
+              </button>
+            )}
             <button
-              onClick={() => setShowTimer(true)}
-              className="bg-streak/20 text-streak px-3 py-1.5 rounded-lg text-sm font-bold
-                         active:scale-95 transition-transform flex items-center gap-1"
+              onClick={() => setShowTimePicker(true)}
+              className="bg-bg-elevated text-text-dim px-3 py-1.5 rounded-lg text-sm
+                         active:scale-95 transition-transform"
+              title="Complete at a different time"
             >
-              ⏱️ Go!
+              🕐
             </button>
-          )}
+          </div>
         </div>
 
-        {/* Expanded: micro steps */}
         {expanded && task.micro_steps && task.micro_steps.length > 0 && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}

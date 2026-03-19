@@ -16,7 +16,7 @@ import type { XpEvent } from '../types'
 
 export function Dashboard() {
   const { currentUser, refreshUser } = useUser()
-  const { tasks, completions, isCompleted, getUncompletedTasks, refetch } = useTasks()
+  const { tasks, completions, isCompleted, getLastCompletion, getUncompletedTasks, refetch } = useTasks()
   const { updateStreak } = useStreak()
   const { registerCompletion } = useCombo()
   const [xpEvents, setXpEvents] = useState<XpEvent[]>([])
@@ -29,78 +29,68 @@ export function Dashboard() {
       id: crypto.randomUUID(),
     }
     setXpEvents(prev => [...prev, event])
-    setTimeout(() => {
-      setXpEvents(prev => prev.filter(e => e.id !== event.id))
-    }, 1500)
+    setTimeout(() => setXpEvents(prev => prev.filter(e => e.id !== event.id)), 1500)
   }, [])
 
-  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number) => {
+  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => {
     if (!currentUser) return
-
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
 
-    // Register with global combo — returns the multiplier
     const comboMult = registerCompletion()
-
-    // Per-task streak and decay
     const taskStreak = getTaskStreak(task, completions)
     const taskStreakMult = getTaskStreakMultiplier(taskStreak, task.recurring)
     const decayMult = getDecayMultiplier(task)
 
-    // Calculate XP with all multipliers
     const xpEarned = calculateXp(
-      task.xp_reward,
-      task.difficulty,
-      currentUser.current_streak,
-      comboMult,
-      usedTimer ? 1.5 : 1,
-      taskStreakMult,
-      decayMult,
+      task.xp_reward, task.difficulty, currentUser.current_streak,
+      comboMult, usedTimer ? 1.5 : 1, taskStreakMult, decayMult,
     )
 
-    // Record completion
     await supabase.from('completions').insert({
       task_id: taskId,
       user_id: currentUser.id,
+      completed_at: completedAt ? completedAt.toISOString() : new Date().toISOString(),
       xp_earned: xpEarned,
       used_timer: usedTimer,
       timer_seconds: timerSeconds || null,
       combo_multiplier: comboMult,
     })
 
-    // Update user XP (both lifetime and spendable)
     const newXp = currentUser.total_xp + xpEarned
     const newSpendable = (currentUser.spendable_xp || 0) + xpEarned
     const newLevel = getLevelForXp(newXp)
     const leveledUp = newLevel > currentUser.level
 
-    await supabase
-      .from('users')
-      .update({
-        total_xp: newXp,
-        spendable_xp: newSpendable,
-        level: newLevel,
-      })
-      .eq('id', currentUser.id)
+    await supabase.from('users').update({
+      total_xp: newXp, spendable_xp: newSpendable, level: newLevel,
+    }).eq('id', currentUser.id)
 
-    // Effects!
     playComplete()
     fireConfetti()
     spawnXp(xpEarned)
+    if (leveledUp) setTimeout(() => { playLevelUp(); fireBigConfetti() }, 500)
 
-    if (leveledUp) {
-      setTimeout(() => {
-        playLevelUp()
-        fireBigConfetti()
-      }, 500)
-    }
-
-    // Update streak
     await updateStreak()
     await refreshUser()
     await refetch()
   }, [currentUser, tasks, completions, registerCompletion, updateStreak, refreshUser, refetch, spawnXp])
+
+  const handleEditTime = useCallback(async (taskId: string, newTime: Date) => {
+    if (!currentUser) return
+    // Find the most recent completion for this task today
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+    const completion = completions
+      .filter(c => c.task_id === taskId && new Date(c.completed_at) >= todayStart)
+      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime())[0]
+    if (!completion) return
+
+    await supabase.from('completions')
+      .update({ completed_at: newTime.toISOString() })
+      .eq('id', completion.id)
+
+    await refetch()
+  }, [currentUser, completions, refetch])
 
   if (!currentUser) return null
 
@@ -112,7 +102,6 @@ export function Dashboard() {
     <div className="space-y-4">
       <XpPopup events={xpEvents} />
 
-      {/* Daily progress ring */}
       <div className="bg-bg-card rounded-2xl p-4 border border-bg-elevated text-center">
         <div className="text-text-dim text-sm mb-1">Today's Progress</div>
         <div className="text-3xl font-bold">
@@ -129,21 +118,18 @@ export function Dashboard() {
 
       <LevelBar />
       <StreakFire />
-
-      {/* Just Start */}
       <JustStartButton tasks={uncompleted} onComplete={handleComplete} />
 
-      {/* Task list */}
       <div className="space-y-2">
-        <h2 className="text-lg font-bold flex items-center gap-2">
-          📋 Today's Quests
-        </h2>
+        <h2 className="text-lg font-bold">📋 Today's Quests</h2>
         {todayTasks.map(task => (
           <TaskCard
             key={task.id}
             task={task}
             completed={isCompleted(task.id)}
+            completedAt={getLastCompletion(task.id)}
             onComplete={handleComplete}
+            onEditTime={handleEditTime}
             taskStreak={getTaskStreak(task, completions)}
             decayMultiplier={getDecayMultiplier(task)}
           />

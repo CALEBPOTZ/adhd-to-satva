@@ -21,7 +21,7 @@ const CATEGORIES = [
 
 export function Tasks() {
   const { currentUser, refreshUser } = useUser()
-  const { tasks, completions, isCompleted, refetch } = useTasks()
+  const { tasks, completions, isCompleted, getLastCompletion, refetch } = useTasks()
   const { updateStreak } = useStreak()
   const { registerCompletion } = useCombo()
   const [filter, setFilter] = useState('all')
@@ -29,7 +29,7 @@ export function Tasks() {
 
   const filtered = filter === 'all' ? tasks : tasks.filter(t => t.category === filter)
 
-  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number) => {
+  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => {
     if (!currentUser) return
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
@@ -47,6 +47,7 @@ export function Tasks() {
     await supabase.from('completions').insert({
       task_id: taskId,
       user_id: currentUser.id,
+      completed_at: completedAt ? completedAt.toISOString() : new Date().toISOString(),
       xp_earned: xpEarned,
       used_timer: usedTimer,
       timer_seconds: timerSeconds || null,
@@ -56,9 +57,7 @@ export function Tasks() {
     const newXp = currentUser.total_xp + xpEarned
     const newSpendable = (currentUser.spendable_xp || 0) + xpEarned
     await supabase.from('users').update({
-      total_xp: newXp,
-      spendable_xp: newSpendable,
-      level: getLevelForXp(newXp),
+      total_xp: newXp, spendable_xp: newSpendable, level: getLevelForXp(newXp),
     }).eq('id', currentUser.id)
 
     playComplete()
@@ -67,8 +66,7 @@ export function Tasks() {
     const event: XpEvent = {
       amount: xpEarned,
       x: Math.random() * (window.innerWidth - 100) + 50,
-      y: 300,
-      id: crypto.randomUUID(),
+      y: 300, id: crypto.randomUUID(),
     }
     setXpEvents(prev => [...prev, event])
     setTimeout(() => setXpEvents(prev => prev.filter(e => e.id !== event.id)), 1500)
@@ -78,13 +76,25 @@ export function Tasks() {
     await refetch()
   }, [currentUser, tasks, completions, registerCompletion, updateStreak, refreshUser, refetch])
 
+  const handleEditTime = useCallback(async (taskId: string, newTime: Date) => {
+    if (!currentUser) return
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+    const completion = completions
+      .filter(c => c.task_id === taskId && new Date(c.completed_at) >= todayStart)
+      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime())[0]
+    if (!completion) return
+
+    await supabase.from('completions')
+      .update({ completed_at: newTime.toISOString() })
+      .eq('id', completion.id)
+    await refetch()
+  }, [currentUser, completions, refetch])
+
   return (
     <div className="space-y-4">
       <XpPopup events={xpEvents} />
-
       <h1 className="text-2xl font-bold">All Tasks</h1>
 
-      {/* Filter tabs */}
       <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
         {CATEGORIES.map(cat => (
           <button
@@ -100,14 +110,15 @@ export function Tasks() {
         ))}
       </div>
 
-      {/* Tasks */}
       <div className="space-y-2">
         {filtered.map(task => (
           <TaskCard
             key={task.id}
             task={task}
             completed={isCompleted(task.id)}
+            completedAt={getLastCompletion(task.id)}
             onComplete={handleComplete}
+            onEditTime={handleEditTime}
             taskStreak={getTaskStreak(task, completions)}
             decayMultiplier={getDecayMultiplier(task)}
           />
