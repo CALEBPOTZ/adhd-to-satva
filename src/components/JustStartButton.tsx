@@ -9,7 +9,7 @@ interface JustStartButtonProps {
   tasks: Task[]
   allTasks: Task[]
   completions: Completion[]
-  onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number) => void
+  onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date, secondsRemaining?: number) => void
 }
 
 export function JustStartButton({ tasks, allTasks, completions, onComplete }: JustStartButtonProps) {
@@ -44,11 +44,11 @@ export function JustStartButton({ tasks, allTasks, completions, onComplete }: Ju
     playJustStart()
   }, [tasks, allTasks, completions])
 
-  const handleTimerComplete = useCallback(() => {
+  const handleTimerComplete = useCallback((secondsRemaining: number) => {
     if (!selectedTask) return
     setShowTimer(false)
     setActive(false)
-    onComplete(selectedTask.id, true, 300)
+    onComplete(selectedTask.id, true, 300, undefined, secondsRemaining)
   }, [selectedTask, onComplete])
 
   const handleDone = useCallback(() => {

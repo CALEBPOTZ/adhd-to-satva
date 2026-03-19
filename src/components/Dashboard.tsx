@@ -34,7 +34,7 @@ export function Dashboard() {
     setTimeout(() => setXpEvents(prev => prev.filter(e => e.id !== event.id)), 1500)
   }, [])
 
-  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => {
+  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date, secondsRemaining?: number) => {
     if (!currentUser) return
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
@@ -44,9 +44,23 @@ export function Dashboard() {
     const taskStreakMult = getTaskStreakMultiplier(taskStreak, task.recurring)
     const decayMult = getDecayMultiplier(task, completions.some(c => c.task_id === task.id))
 
+    // Timer bonus: beat the timer = 1.5x base, plus up to 0.5x extra based on how much time was left
+    let timerMult = 1
+    if (usedTimer && secondsRemaining !== undefined) {
+      const totalTime = timerSeconds || 300
+      if (secondsRemaining > 0) {
+        // Beat the timer! 1.5x base + up to 0.5x bonus for speed
+        const speedBonus = (secondsRemaining / totalTime) * 0.5
+        timerMult = 1.5 + speedBonus // Range: 1.5x to 2.0x
+      } else {
+        // Didn't beat it — still used the timer, small bonus
+        timerMult = 1.2
+      }
+    }
+
     const xpEarned = calculateXp(
       task.xp_reward, task.difficulty, currentUser.current_streak,
-      comboMult, usedTimer ? 1.5 : 1, taskStreakMult, decayMult,
+      comboMult, timerMult, taskStreakMult, decayMult,
     )
 
     await supabase.from('completions').insert({

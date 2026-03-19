@@ -4,7 +4,7 @@ import { playTimerTick, playTimerDone } from '../lib/sounds'
 
 interface TimerProps {
   seconds: number
-  onComplete: () => void
+  onComplete: (secondsRemaining: number) => void
   onCancel: () => void
   taskTitle: string
 }
@@ -12,19 +12,22 @@ interface TimerProps {
 export function Timer({ seconds, onComplete, onCancel, taskTitle }: TimerProps) {
   const [remaining, setRemaining] = useState(seconds)
   const [running, setRunning] = useState(true)
+  const remainingRef = useRef(seconds)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     if (!running) return
     intervalRef.current = setInterval(() => {
       setRemaining(prev => {
-        if (prev <= 1) {
+        const next = prev - 1
+        remainingRef.current = next
+        if (next <= 0) {
           playTimerDone()
           setRunning(false)
           return 0
         }
-        if (prev <= 6) playTimerTick()
-        return prev - 1
+        if (next <= 5) playTimerTick()
+        return next
       })
     }, 1000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
@@ -33,10 +36,11 @@ export function Timer({ seconds, onComplete, onCancel, taskTitle }: TimerProps) 
   const progress = 1 - remaining / seconds
   const mins = Math.floor(remaining / 60)
   const secs = remaining % 60
+  const beatTheTimer = remainingRef.current > 0
 
   const handleDone = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current)
-    onComplete()
+    onComplete(remainingRef.current)
   }, [onComplete])
 
   return (
@@ -63,25 +67,31 @@ export function Timer({ seconds, onComplete, onCancel, taskTitle }: TimerProps) 
               transition={{ duration: 0.5 }}
             />
           </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
             <motion.span
               className="text-5xl font-mono font-bold"
-              animate={remaining <= 10 ? { scale: [1, 1.1, 1] } : {}}
+              animate={remaining <= 10 && remaining > 0 ? { scale: [1, 1.1, 1] } : {}}
               transition={{ duration: 0.5, repeat: Infinity }}
-              style={{ color: remaining <= 10 ? '#f97316' : '#22d3ee' }}
+              style={{ color: remaining <= 10 ? '#f97316' : remaining === 0 ? '#f97316' : '#22d3ee' }}
             >
-              {mins}:{secs.toString().padStart(2, '0')}
+              {remaining === 0 ? '⏰' : `${mins}:${secs.toString().padStart(2, '0')}`}
             </motion.span>
+            {remaining === 0 && (
+              <span className="text-streak text-sm font-bold mt-1">Time's up!</span>
+            )}
           </div>
         </div>
 
         <div className="flex gap-3">
           <button
             onClick={handleDone}
-            className="flex-1 bg-success text-bg font-bold py-3 px-6 rounded-xl text-lg
-                       active:scale-95 transition-transform"
+            className={`flex-1 font-bold py-3 px-6 rounded-xl text-lg
+                       active:scale-95 transition-transform
+                       ${beatTheTimer
+                         ? 'bg-success text-bg'
+                         : 'bg-streak/80 text-bg'}`}
           >
-            ✅ Done!
+            {beatTheTimer ? '⚡ Beat it!' : '✅ Done'}
           </button>
           <button
             onClick={onCancel}
@@ -91,6 +101,11 @@ export function Timer({ seconds, onComplete, onCancel, taskTitle }: TimerProps) 
             Cancel
           </button>
         </div>
+        {beatTheTimer && remaining > 0 && (
+          <div className="text-xp text-xs mt-2 font-bold">
+            🏆 {remaining}s left — bonus XP!
+          </div>
+        )}
       </div>
     </motion.div>
   )

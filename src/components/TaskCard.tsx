@@ -9,7 +9,7 @@ interface TaskCardProps {
   task: Task
   completed: boolean
   completedAt?: Date | null
-  onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => void
+  onComplete: (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date, secondsRemaining?: number) => void
   onEditTime?: (taskId: string, newTime: Date) => void
   onUndo?: (taskId: string) => void
   taskStreak?: number
@@ -57,9 +57,9 @@ export function TaskCard({ task, completed, completedAt, onComplete, onEditTime,
     onComplete(task.id, false, undefined, time)
   }, [task.id, onComplete])
 
-  const handleTimerComplete = useCallback(() => {
+  const handleTimerComplete = useCallback((secondsRemaining: number) => {
     setShowTimer(false)
-    onComplete(task.id, true, timerSeconds)
+    onComplete(task.id, true, timerSeconds, undefined, secondsRemaining)
   }, [task.id, timerSeconds, onComplete])
 
   const handleEditTime = useCallback((time: Date) => {

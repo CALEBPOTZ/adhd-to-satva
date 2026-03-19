@@ -43,7 +43,7 @@ export function Tasks() {
     setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
-  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date) => {
+  const handleComplete = useCallback(async (taskId: string, usedTimer: boolean, timerSeconds?: number, completedAt?: Date, secondsRemaining?: number) => {
     if (!currentUser) return
     const task = tasks.find(t => t.id === taskId)
     if (!task) return
@@ -53,9 +53,20 @@ export function Tasks() {
     const taskStreakMult = getTaskStreakMultiplier(taskStreak, task.recurring)
     const decayMult = getDecayMultiplier(task, completions.some(c => c.task_id === task.id))
 
+    let timerMult = 1
+    if (usedTimer && secondsRemaining !== undefined) {
+      const totalTime = timerSeconds || 300
+      if (secondsRemaining > 0) {
+        const speedBonus = (secondsRemaining / totalTime) * 0.5
+        timerMult = 1.5 + speedBonus
+      } else {
+        timerMult = 1.2
+      }
+    }
+
     const xpEarned = calculateXp(
       task.xp_reward, task.difficulty, currentUser.current_streak,
-      comboMult, usedTimer ? 1.5 : 1, taskStreakMult, decayMult,
+      comboMult, timerMult, taskStreakMult, decayMult,
     )
 
     await supabase.from('completions').insert({
