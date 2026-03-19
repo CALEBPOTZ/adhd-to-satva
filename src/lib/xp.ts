@@ -242,13 +242,23 @@ export function getDecayMultiplier(task: Task): number {
   return Math.max(floor, 1 - progress * decayRange)
 }
 
-// Japa time bonus
+// Japa time bonus — exponential reward for early completion
+// 16 rounds is the baseline (non-negotiable), so the XP is all about WHEN
 export function getJapaMultiplier(completedAt: Date): number {
-  const hour = completedAt.getHours()
-  if (hour < 5) return 3.0
-  if (hour < 6) return 2.0
-  if (hour < 7) return 1.5
-  return 1.0
+  const hour = completedAt.getHours() + completedAt.getMinutes() / 60
+  if (hour < 5) return 5.0   // Before 5am: legendary — 5x
+  if (hour < 6) return 3.5   // Before 6am: excellent — 3.5x
+  if (hour < 7) return 2.5   // Before 7am: great — 2.5x
+  if (hour < 8) return 1.5   // Before 8am: good — 1.5x
+  return 1.0                  // After 8am: base
+}
+
+export function getJapaTimeLabel(hour: number): { label: string; color: string } {
+  if (hour < 5) return { label: '5x LEGENDARY', color: 'text-accent-glow' }
+  if (hour < 6) return { label: '3.5x EXCELLENT', color: 'text-accent' }
+  if (hour < 7) return { label: '2.5x GREAT', color: 'text-sadhana' }
+  if (hour < 8) return { label: '1.5x GOOD', color: 'text-success' }
+  return { label: '1x BASE', color: 'text-text-dim' }
 }
 
 // ============================================================

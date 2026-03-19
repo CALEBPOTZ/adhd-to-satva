@@ -2,19 +2,19 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { supabase } from '../lib/supabase'
 import { useUser } from '../hooks/useUser'
-import { getJapaMultiplier, calculateXp } from '../lib/xp'
+import { getJapaMultiplier, getJapaTimeLabel } from '../lib/xp'
 import { playComplete } from '../lib/sounds'
-import { fireConfetti } from './Confetti'
+import { fireBigConfetti } from './Confetti'
 import type { SadhanaLog } from '../types'
 
-const JAPA_GOAL = 16
+const JAPA_BASE_XP = 20 // Base for 16 rounds — low because it's already a habit
+const JAPA_EXTRA_ROUND_XP = 15 // Each round beyond 16
 const BASE_XP = {
-  japa: 50,       // per round
-  reading: 3,     // per minute
+  reading: 3,
   arti_puja: 30,
   flower_offering: 20,
   offering_plate: 20,
-  class: 3,       // per minute
+  class: 3,
 }
 
 export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) => void }) {
@@ -22,6 +22,7 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
   const [log, setLog] = useState<SadhanaLog | null>(null)
   const [readingInput, setReadingInput] = useState('')
   const [classInput, setClassInput] = useState('')
+  const [extraRoundsInput, setExtraRoundsInput] = useState('')
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -41,7 +42,6 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
   const upsertLog = useCallback(async (updates: Partial<SadhanaLog>, xpAmount: number) => {
     if (!currentUser) return
 
-    // Build the upsert payload — exclude `id` so Supabase can handle it
     const payload: Record<string, unknown> = {
       user_id: currentUser.id,
       date: today,
@@ -68,7 +68,6 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
     }
     if (data) setLog(data)
 
-    // Award XP to user
     if (xpAmount > 0) {
       await supabase
         .from('users')
@@ -83,38 +82,44 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
     }
   }, [currentUser, log, today, onXpEarned, refreshUser])
 
-  const logJapa = useCallback(async () => {
+  // Complete 16 rounds
+  const completeJapa = useCallback(async () => {
     const now = new Date()
     const multiplier = getJapaMultiplier(now)
-    const rounds = (log?.japa_rounds || 0) + 1
-    // Bonus XP for completing beyond 16
-    const bonusMult = rounds > JAPA_GOAL ? 1.5 : 1
-    const xp = calculateXp(BASE_XP.japa, 1, currentUser?.current_streak || 0, 1, multiplier * bonusMult)
-
+    const xp = Math.round(JAPA_BASE_XP * multiplier * (currentUser?.current_streak || 1))
     await upsertLog({
-      japa_rounds: rounds,
+      japa_rounds: 16,
       japa_completed_at: now.toISOString(),
     }, xp)
+    fireBigConfetti()
+  }, [currentUser, upsertLog])
 
-    // Celebrate hitting 16!
-    if (rounds === JAPA_GOAL) {
-      fireConfetti()
-    }
-  }, [log, currentUser, upsertLog])
+  // Log extra rounds beyond 16
+  const logExtraRounds = useCallback(async () => {
+    const extra = parseInt(extraRoundsInput) || 0
+    if (extra <= 0) return
+    const now = new Date()
+    const multiplier = getJapaMultiplier(now)
+    const currentRounds = log?.japa_rounds || 16
+    const xp = Math.round(extra * JAPA_EXTRA_ROUND_XP * multiplier)
+    await upsertLog({
+      japa_rounds: currentRounds + extra,
+      japa_completed_at: now.toISOString(),
+    }, xp)
+    setExtraRoundsInput('')
+  }, [extraRoundsInput, log, upsertLog])
 
   const toggleBoolean = useCallback(async (field: 'arti_puja' | 'flower_offering' | 'offering_plate') => {
     const current = log?.[field] || false
     const xpMap = { arti_puja: BASE_XP.arti_puja, flower_offering: BASE_XP.flower_offering, offering_plate: BASE_XP.offering_plate }
-    const xp = current ? 0 : xpMap[field]
-    await upsertLog({ [field]: !current }, current ? 0 : xp)
+    await upsertLog({ [field]: !current }, current ? 0 : xpMap[field])
   }, [log, upsertLog])
 
   const logReading = useCallback(async () => {
     const mins = parseInt(readingInput) || 0
     if (mins <= 0) return
     const totalMins = (log?.reading_minutes || 0) + mins
-    const xp = mins * BASE_XP.reading
-    await upsertLog({ reading_minutes: totalMins }, xp)
+    await upsertLog({ reading_minutes: totalMins }, mins * BASE_XP.reading)
     setReadingInput('')
   }, [readingInput, log, upsertLog])
 
@@ -122,16 +127,15 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
     const mins = parseInt(classInput) || 0
     if (mins <= 0) return
     const totalMins = (log?.class_minutes || 0) + mins
-    const xp = mins * BASE_XP.class
-    await upsertLog({ class_minutes: totalMins }, xp)
+    await upsertLog({ class_minutes: totalMins }, mins * BASE_XP.class)
     setClassInput('')
   }, [classInput, log, upsertLog])
 
-  const japaHour = new Date().getHours()
-  const japaBonus = japaHour < 5 ? '3x' : japaHour < 6 ? '2x' : japaHour < 7 ? '1.5x' : '1x'
+  const now = new Date()
+  const currentHour = now.getHours() + now.getMinutes() / 60
+  const japaTime = getJapaTimeLabel(currentHour)
+  const japaDone = (log?.japa_rounds || 0) >= 16
   const japaRounds = log?.japa_rounds || 0
-  const japaProgress = Math.min(1, japaRounds / JAPA_GOAL)
-  const japaComplete = japaRounds >= JAPA_GOAL
 
   return (
     <div className="space-y-3">
@@ -140,62 +144,88 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
         {log && <span className="text-xs text-text-dim font-normal">Today: +{log.xp_earned} XP</span>}
       </h2>
 
-      {/* Japa — 16 round goal */}
-      <div className={`bg-bg-card border rounded-xl p-4 ${japaComplete ? 'border-success/30 bg-success/5' : 'border-sadhana/20'}`}>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="font-medium">Japa Rounds</div>
-            <div className="text-text-dim text-sm">
-              <span className={japaComplete ? 'text-success font-bold' : 'text-sadhana font-bold'}>
-                {japaRounds}
-              </span>
-              <span> / {JAPA_GOAL} rounds</span>
-              {japaRounds > JAPA_GOAL && (
-                <span className="text-accent ml-1 font-bold">+{japaRounds - JAPA_GOAL} bonus!</span>
+      {/* Japa — 16 rounds, one button */}
+      <div className={`bg-bg-card border rounded-xl p-4 ${japaDone ? 'border-success/30 bg-success/5' : 'border-sadhana/20'}`}>
+        <div className="text-center">
+          <div className="font-medium mb-1">Japa — 16 Rounds</div>
+
+          {!japaDone ? (
+            <>
+              {/* Time bonus indicator */}
+              <div className="mb-3">
+                <span className={`text-sm font-bold ${japaTime.color}`}>{japaTime.label}</span>
+                <div className="text-text-dim text-xs mt-1">Earlier = exponentially more XP</div>
+              </div>
+
+              {/* Time bonus tiers */}
+              <div className="flex justify-center gap-1 mb-4 text-xs">
+                {[
+                  { label: '<5am', mult: '5x', active: currentHour < 5 },
+                  { label: '<6am', mult: '3.5x', active: currentHour < 6 },
+                  { label: '<7am', mult: '2.5x', active: currentHour < 7 },
+                  { label: '<8am', mult: '1.5x', active: currentHour < 8 },
+                  { label: '8am+', mult: '1x', active: true },
+                ].map((tier, i) => (
+                  <div
+                    key={i}
+                    className={`px-2 py-1 rounded-lg ${
+                      tier.active && (i === 0 || currentHour >= [0, 5, 6, 7, 8][i])
+                        ? i === 0 && currentHour < 5 ? 'bg-accent-glow/20 text-accent-glow font-bold'
+                        : i === 1 && currentHour < 6 ? 'bg-accent/20 text-accent font-bold'
+                        : i === 2 && currentHour < 7 ? 'bg-sadhana/20 text-sadhana font-bold'
+                        : i === 3 && currentHour < 8 ? 'bg-success/20 text-success font-bold'
+                        : 'bg-bg-elevated text-text-dim/50'
+                        : 'bg-bg-elevated text-text-dim/30 line-through'
+                    }`}
+                  >
+                    {tier.label} {tier.mult}
+                  </div>
+                ))}
+              </div>
+
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={completeJapa}
+                className="w-full bg-gradient-to-r from-sadhana to-sadhana/70 text-white font-bold
+                           py-4 rounded-xl text-lg shadow-[0_0_20px_rgba(192,132,252,0.3)]
+                           active:shadow-[0_0_30px_rgba(192,132,252,0.5)] transition-shadow"
+              >
+                🙏 Complete 16 Rounds
+              </motion.button>
+            </>
+          ) : (
+            <>
+              <div className="text-success font-bold text-lg mb-1">✅ 16 Rounds Done!</div>
+              {log?.japa_completed_at && (
+                <div className="text-text-dim text-sm mb-3">
+                  Completed at {new Date(log.japa_completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {' '}— {getJapaTimeLabel(new Date(log.japa_completed_at).getHours()).label}
+                </div>
               )}
-            </div>
-            <div className="text-xs text-sadhana mt-0.5">
-              {japaBonus} time bonus active now
-            </div>
-          </div>
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={logJapa}
-            className={`font-bold w-14 h-14 rounded-full text-xl transition-colors
-              ${japaComplete
-                ? 'bg-success/20 text-success active:bg-success/40'
-                : 'bg-sadhana/20 text-sadhana active:bg-sadhana/40'}`}
-          >
-            +1
-          </motion.button>
-        </div>
-        {/* Progress bar to 16 */}
-        <div className="h-3 bg-bg-elevated rounded-full overflow-hidden">
-          <motion.div
-            className={`h-full rounded-full ${japaComplete
-              ? 'bg-gradient-to-r from-success to-xp'
-              : 'bg-gradient-to-r from-sadhana/60 to-sadhana'}`}
-            animate={{ width: `${japaProgress * 100}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-        {/* Round indicators */}
-        <div className="flex gap-1 mt-2 flex-wrap">
-          {Array.from({ length: JAPA_GOAL }).map((_, i) => (
-            <div
-              key={i}
-              className={`w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold
-                ${i < japaRounds
-                  ? 'bg-sadhana text-bg'
-                  : 'bg-bg-elevated text-text-dim/40'}`}
-            >
-              {i + 1}
-            </div>
-          ))}
-          {japaRounds > JAPA_GOAL && (
-            <div className="w-4 h-4 rounded-full bg-accent text-bg text-[8px] flex items-center justify-center font-bold">
-              +{japaRounds - JAPA_GOAL}
-            </div>
+              {japaRounds > 16 && (
+                <div className="text-accent font-bold mb-2">+{japaRounds - 16} extra rounds!</div>
+              )}
+
+              {/* Extra rounds */}
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={extraRoundsInput}
+                  onChange={e => setExtraRoundsInput(e.target.value)}
+                  placeholder="Extra rounds"
+                  className="flex-1 bg-bg-elevated border border-bg-elevated rounded-lg px-3 py-2 text-text
+                             focus:border-sadhana/50 outline-none text-center"
+                />
+                <button
+                  onClick={logExtraRounds}
+                  className="bg-sadhana/20 text-sadhana px-4 py-2 rounded-lg font-bold
+                             active:scale-95 transition-transform"
+                >
+                  + Extra
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -225,7 +255,7 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
           <div className="font-medium">📖 Reading</div>
           {(log?.reading_minutes || 0) > 0 && (
             <span className="text-xs text-success font-mono bg-success/10 px-2 py-0.5 rounded-full">
-              {log?.reading_minutes} min today (+{(log?.reading_minutes || 0) * BASE_XP.reading} XP)
+              {log?.reading_minutes} min (+{(log?.reading_minutes || 0) * BASE_XP.reading} XP)
             </span>
           )}
         </div>
@@ -255,7 +285,7 @@ export function SadhanaTracker({ onXpEarned }: { onXpEarned: (amount: number) =>
           <div className="font-medium">🎧 Listen to Class</div>
           {(log?.class_minutes || 0) > 0 && (
             <span className="text-xs text-success font-mono bg-success/10 px-2 py-0.5 rounded-full">
-              {log?.class_minutes} min today (+{(log?.class_minutes || 0) * BASE_XP.class} XP)
+              {log?.class_minutes} min (+{(log?.class_minutes || 0) * BASE_XP.class} XP)
             </span>
           )}
         </div>

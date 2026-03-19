@@ -8,40 +8,59 @@ import { LevelBar } from '../components/LevelBar'
 export function Profile() {
   const { currentUser } = useUser()
   const [recentCompletions, setRecentCompletions] = useState<Array<{
-    id: string; completed_at: string; xp_earned: number; tasks: { title: string } | null
+    id: string; completed_at: string; xp_earned: number; task_title?: string
   }>>([])
-  const [stats, setStats] = useState({ totalCompleted: 0, thisWeek: 0 })
+  const [stats, setStats] = useState({ totalCompleted: 0, thisWeek: 0, totalXpEarned: 0 })
 
   const fetchStats = useCallback(async () => {
     if (!currentUser) return
 
-    // Recent completions
-    const { data: completions } = await supabase
-      .from('completions')
-      .select('id, completed_at, xp_earned, tasks(title)')
-      .eq('user_id', currentUser.id)
-      .order('completed_at', { ascending: false })
-      .limit(10)
-    if (completions) setRecentCompletions(completions as never)
+    try {
+      // Recent completions — simple query without join first
+      const { data: completions } = await supabase
+        .from('completions')
+        .select('id, completed_at, xp_earned, task_id')
+        .eq('user_id', currentUser.id)
+        .order('completed_at', { ascending: false })
+        .limit(10)
 
-    // Total count
-    const { count: totalCount } = await supabase
-      .from('completions')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', currentUser.id)
+      if (completions && completions.length > 0) {
+        // Fetch task titles separately
+        const taskIds = [...new Set(completions.map(c => c.task_id))]
+        const { data: tasks } = await supabase
+          .from('tasks')
+          .select('id, title')
+          .in('id', taskIds)
 
-    // This week count
-    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString()
-    const { count: weekCount } = await supabase
-      .from('completions')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', currentUser.id)
-      .gte('completed_at', weekAgo)
+        const taskMap = new Map(tasks?.map(t => [t.id, t.title]) || [])
+        setRecentCompletions(completions.map(c => ({
+          ...c,
+          task_title: taskMap.get(c.task_id) || 'Task',
+        })))
+      }
 
-    setStats({
-      totalCompleted: totalCount || 0,
-      thisWeek: weekCount || 0,
-    })
+      // Total count
+      const { count: totalCount } = await supabase
+        .from('completions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', currentUser.id)
+
+      // This week count
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString()
+      const { count: weekCount } = await supabase
+        .from('completions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', currentUser.id)
+        .gte('completed_at', weekAgo)
+
+      setStats({
+        totalCompleted: totalCount || 0,
+        thisWeek: weekCount || 0,
+        totalXpEarned: currentUser.total_xp || 0,
+      })
+    } catch (err) {
+      console.warn('Profile fetch error:', err)
+    }
   }, [currentUser])
 
   useEffect(() => { fetchStats() }, [fetchStats])
@@ -76,8 +95,8 @@ export function Profile() {
         </motion.div>
         <div className="text-xl font-bold">{currentUser.name}</div>
         <div className="text-sadhana text-sm">{getLevelName(currentUser.level)}</div>
-        <div className="text-xp font-mono mt-1">{currentUser.total_xp.toLocaleString()} Total XP</div>
-        <div className="text-accent font-mono text-sm">{currentUser.spendable_xp.toLocaleString()} Spendable XP</div>
+        <div className="text-xp font-mono mt-1">{(currentUser.total_xp || 0).toLocaleString()} Total XP</div>
+        <div className="text-accent font-mono text-sm">{(currentUser.spendable_xp || 0).toLocaleString()} Spendable</div>
       </div>
 
       <LevelBar />
@@ -87,7 +106,7 @@ export function Profile() {
         {[
           { label: 'Completed', value: stats.totalCompleted, color: 'text-success' },
           { label: 'This Week', value: stats.thisWeek, color: 'text-xp' },
-          { label: 'Best Streak', value: currentUser.longest_streak, color: 'text-streak' },
+          { label: 'Best Streak', value: currentUser.longest_streak || 0, color: 'text-streak' },
         ].map(stat => (
           <div key={stat.label} className="bg-bg-card rounded-xl p-3 border border-bg-elevated text-center">
             <div className={`text-2xl font-bold ${stat.color}`}>{stat.value}</div>
@@ -104,7 +123,7 @@ export function Profile() {
             <div key={c.id} className="bg-bg-card rounded-xl p-3 border border-bg-elevated flex items-center gap-3">
               <span className="text-success">✅</span>
               <div className="flex-1 min-w-0">
-                <div className="text-sm truncate">{c.tasks?.title || 'Task'}</div>
+                <div className="text-sm truncate">{c.task_title}</div>
                 <div className="text-text-dim text-xs">
                   {new Date(c.completed_at).toLocaleDateString()} •{' '}
                   {new Date(c.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
