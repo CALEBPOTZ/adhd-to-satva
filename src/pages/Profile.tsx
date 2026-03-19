@@ -1,48 +1,62 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useUser } from '../hooks/useUser'
 import { supabase } from '../lib/supabase'
 import { getLevelName } from '../lib/xp'
 import { LevelBar } from '../components/LevelBar'
-import type { Completion } from '../types'
 
 export function Profile() {
   const { currentUser } = useUser()
-  const [recentCompletions, setRecentCompletions] = useState<(Completion & { tasks: { title: string } })[]>([])
+  const [recentCompletions, setRecentCompletions] = useState<Array<{
+    id: string; completed_at: string; xp_earned: number; tasks: { title: string } | null
+  }>>([])
   const [stats, setStats] = useState({ totalCompleted: 0, thisWeek: 0 })
 
-  useEffect(() => {
+  const fetchStats = useCallback(async () => {
     if (!currentUser) return
-    // Fetch recent completions
-    supabase
+
+    // Recent completions
+    const { data: completions } = await supabase
       .from('completions')
-      .select('*, tasks(title)')
+      .select('id, completed_at, xp_earned, tasks(title)')
       .eq('user_id', currentUser.id)
       .order('completed_at', { ascending: false })
       .limit(10)
-      .then(({ data }) => {
-        if (data) setRecentCompletions(data as never)
-      })
+    if (completions) setRecentCompletions(completions as never)
 
-    // Fetch stats
-    supabase
+    // Total count
+    const { count: totalCount } = await supabase
       .from('completions')
-      .select('id', { count: 'exact' })
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', currentUser.id)
-      .then(({ count }) => {
-        setStats(s => ({ ...s, totalCompleted: count || 0 }))
-      })
 
+    // This week count
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString()
-    supabase
+    const { count: weekCount } = await supabase
       .from('completions')
-      .select('id', { count: 'exact' })
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', currentUser.id)
       .gte('completed_at', weekAgo)
-      .then(({ count }) => {
-        setStats(s => ({ ...s, thisWeek: count || 0 }))
-      })
+
+    setStats({
+      totalCompleted: totalCount || 0,
+      thisWeek: weekCount || 0,
+    })
   }, [currentUser])
+
+  useEffect(() => { fetchStats() }, [fetchStats])
+
+  // Refresh stats when completions change
+  useEffect(() => {
+    if (!currentUser) return
+    const channel = supabase
+      .channel('profile-completions')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'completions' }, () => {
+        fetchStats()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [currentUser, fetchStats])
 
   if (!currentUser) return null
 
@@ -63,6 +77,7 @@ export function Profile() {
         <div className="text-xl font-bold">{currentUser.name}</div>
         <div className="text-sadhana text-sm">{getLevelName(currentUser.level)}</div>
         <div className="text-xp font-mono mt-1">{currentUser.total_xp.toLocaleString()} Total XP</div>
+        <div className="text-accent font-mono text-sm">{currentUser.spendable_xp.toLocaleString()} Spendable XP</div>
       </div>
 
       <LevelBar />
@@ -89,7 +104,7 @@ export function Profile() {
             <div key={c.id} className="bg-bg-card rounded-xl p-3 border border-bg-elevated flex items-center gap-3">
               <span className="text-success">✅</span>
               <div className="flex-1 min-w-0">
-                <div className="text-sm truncate">{(c as unknown as { tasks: { title: string } }).tasks?.title || 'Task'}</div>
+                <div className="text-sm truncate">{c.tasks?.title || 'Task'}</div>
                 <div className="text-text-dim text-xs">
                   {new Date(c.completed_at).toLocaleDateString()} •{' '}
                   {new Date(c.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

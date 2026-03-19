@@ -7,6 +7,7 @@ import { playCombo } from './lib/sounds'
 import { runNotificationChecks, requestNotificationPermission } from './lib/notifications'
 import { startUpdateChecker } from './lib/updater'
 import { UserSwitcher } from './components/UserSwitcher'
+import { UserPicker } from './components/UserPicker'
 import { ComboMeter } from './components/ComboMeter'
 import { UpdateBanner } from './components/UpdateBanner'
 import { Home } from './pages/Home'
@@ -24,11 +25,21 @@ const NAV_ITEMS = [
   { path: '/profile', label: 'Profile', icon: '👤' },
 ]
 
+// Unique device ID — persists forever so each phone remembers its user
+function getDeviceId(): string {
+  let id = localStorage.getItem('device_id')
+  if (!id) {
+    id = crypto.randomUUID()
+    localStorage.setItem('device_id', id)
+  }
+  return id
+}
+
 function App() {
   const [users, setUsers] = useState<User[]>([])
-  const [currentIndex, setCurrentIndex] = useState(() => {
-    const saved = localStorage.getItem('currentUserIndex')
-    return saved ? parseInt(saved) : 0
+  const [currentIndex, setCurrentIndex] = useState<number | null>(() => {
+    const saved = localStorage.getItem(`user_${getDeviceId()}`)
+    return saved !== null ? parseInt(saved) : null
   })
   const [loading, setLoading] = useState(true)
   const [updateAvailable, setUpdateAvailable] = useState(false)
@@ -44,7 +55,6 @@ function App() {
   const comboResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const registerCompletion = useCallback(() => {
-    // Clear any pending reset
     if (comboResetTimer.current) clearTimeout(comboResetTimer.current)
 
     const newCombo = shouldResetCombo(lastCompletionTime) ? 1 : combo + 1
@@ -53,7 +63,6 @@ function App() {
 
     if (newCombo >= 2) playCombo()
 
-    // Auto-reset combo after window expires
     comboResetTimer.current = setTimeout(() => {
       setCombo(0)
       setLastCompletionTime(null)
@@ -75,7 +84,7 @@ function App() {
 
   useEffect(() => { fetchUsers() }, [fetchUsers])
 
-  // Real-time user updates
+  // Real-time user updates (XP, level, etc.)
   useEffect(() => {
     const channel = supabase
       .channel('user-changes')
@@ -86,33 +95,37 @@ function App() {
     return () => { supabase.removeChannel(channel) }
   }, [fetchUsers])
 
-  // Notification system — check on load and every 30 minutes
+  // Notification system
   useEffect(() => {
+    if (currentIndex === null) return
     const currentUser = users[currentIndex]
     if (!currentUser) return
-    // Request permission on first load
     requestNotificationPermission()
-    // Run checks immediately
     runNotificationChecks(currentUser.id)
-    // Then every 30 minutes
     const interval = setInterval(() => {
       runNotificationChecks(currentUser.id)
     }, 30 * 60 * 1000)
     return () => clearInterval(interval)
   }, [users, currentIndex])
 
+  const pickUser = useCallback((index: number) => {
+    setCurrentIndex(index)
+    localStorage.setItem(`user_${getDeviceId()}`, String(index))
+  }, [])
+
   const switchUser = useCallback(() => {
-    const next = (currentIndex + 1) % users.length
-    setCurrentIndex(next)
-    localStorage.setItem('currentUserIndex', String(next))
-  }, [currentIndex, users.length])
+    const next = ((currentIndex ?? 0) + 1) % users.length
+    pickUser(next)
+  }, [currentIndex, users.length, pickUser])
 
   const refreshUser = useCallback(async () => {
     await fetchUsers()
   }, [fetchUsers])
 
-  const currentUser = users[currentIndex] || null
-  const otherUser = users.length > 1 ? users[(currentIndex + 1) % users.length] : null
+  const currentUser = currentIndex !== null ? (users[currentIndex] || null) : null
+  const otherUser = currentIndex !== null && users.length > 1
+    ? users[((currentIndex) + 1) % users.length]
+    : null
 
   if (loading) {
     return (
@@ -132,14 +145,16 @@ function App() {
           <div className="text-5xl mb-4">🙏</div>
           <h1 className="text-2xl font-bold mb-2">ADHD to Satva</h1>
           <p className="text-text-dim mb-4">
-            Connect to Supabase to get started. Add your <code className="bg-bg-elevated px-2 py-0.5 rounded text-sm">VITE_SUPABASE_URL</code> and <code className="bg-bg-elevated px-2 py-0.5 rounded text-sm">VITE_SUPABASE_ANON_KEY</code> to a <code className="bg-bg-elevated px-2 py-0.5 rounded text-sm">.env</code> file.
-          </p>
-          <p className="text-text-dim text-sm">
-            Then run the schema.sql in your Supabase SQL editor.
+            Connect to Supabase to get started.
           </p>
         </div>
       </div>
     )
+  }
+
+  // Show user picker if no user selected on this device
+  if (currentIndex === null || !currentUser) {
+    return <UserPicker users={users} onPick={pickUser} />
   }
 
   return (
@@ -156,7 +171,6 @@ function App() {
                 </h1>
                 <UserSwitcher />
               </div>
-              {/* Global combo bar — visible on every page */}
               {combo >= 2 && (
                 <div className="mt-2">
                   <ComboMeter />

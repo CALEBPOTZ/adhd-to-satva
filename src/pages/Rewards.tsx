@@ -13,8 +13,9 @@ export function Rewards() {
   const [justRedeemed, setJustRedeemed] = useState<string | null>(null)
 
   useEffect(() => {
-    supabase.from('rewards').select('*').eq('active', true).order('cost').then(({ data }) => {
+    supabase.from('rewards').select('*').eq('active', true).order('cost').then(({ data, error }) => {
       if (data) setRewards(data)
+      if (error) console.warn('Rewards table may not exist yet:', error.message)
     })
   }, [])
 
@@ -64,6 +65,21 @@ export function Rewards() {
   }, [currentUser, refreshUser])
 
   if (!currentUser) return null
+
+  if (rewards.length === 0) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold">🎁 Reward Shop</h1>
+        <div className="bg-bg-card rounded-2xl p-6 border border-bg-elevated text-center">
+          <div className="text-4xl mb-3">🏗️</div>
+          <div className="font-bold mb-2">Shop not set up yet</div>
+          <div className="text-text-dim text-sm">
+            Run the rewards SQL script in Supabase to unlock the shop!
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
