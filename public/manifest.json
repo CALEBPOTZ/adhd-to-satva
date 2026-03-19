@@ -1,0 +1,23 @@
+{
+  "name": "ADHD to Satva",
+  "short_name": "Satva",
+  "description": "Gamified task management for ADHD — chores, goals, and sadhana",
+  "start_url": "/adhd-to-satva/",
+  "scope": "/adhd-to-satva/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f0a1e",
+  "theme_color": "#0f0a1e",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
