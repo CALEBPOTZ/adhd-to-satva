@@ -4,6 +4,7 @@ import { useTasks } from '../hooks/useTasks'
 import { useUser } from '../hooks/useUser'
 import { useStreak } from '../hooks/useStreak'
 import { useCombo } from '../hooks/useCombo'
+import { useDate } from '../hooks/useDate'
 import { supabase } from '../lib/supabase'
 import { calculateXp, getLevelForXp, getTaskStreak, getTaskStreakMultiplier, getDecayMultiplier } from '../lib/xp'
 import { groupTasksByFrequency, isBlockedByDependency, getChainInfo } from '../lib/priority'
@@ -30,6 +31,7 @@ export function Tasks() {
   const { tasks, completions, isCompleted, getLastCompletion, refetch } = useTasks()
   const { updateStreak } = useStreak()
   const { registerCompletion } = useCombo()
+  const { date, isToday } = useDate()
   const [filter, setFilter] = useState('all')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [xpEvents, setXpEvents] = useState<XpEvent[]>([])
@@ -59,7 +61,7 @@ export function Tasks() {
     await supabase.from('completions').insert({
       task_id: taskId,
       user_id: currentUser.id,
-      completed_at: completedAt ? completedAt.toISOString() : new Date().toISOString(),
+      completed_at: completedAt ? completedAt.toISOString() : (isToday ? new Date().toISOString() : `${date}T12:00:00`),
       xp_earned: xpEarned,
       used_timer: usedTimer,
       timer_seconds: timerSeconds || null,

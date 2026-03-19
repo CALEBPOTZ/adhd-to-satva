@@ -3,6 +3,7 @@ import { useUser } from '../hooks/useUser'
 import { useTasks } from '../hooks/useTasks'
 import { useStreak } from '../hooks/useStreak'
 import { useCombo } from '../hooks/useCombo'
+import { useDate } from '../hooks/useDate'
 import { supabase } from '../lib/supabase'
 import { calculateXp, getLevelForXp, getTaskStreak, getTaskStreakMultiplier, getDecayMultiplier } from '../lib/xp'
 import { playComplete, playLevelUp } from '../lib/sounds'
@@ -18,6 +19,7 @@ export function Dashboard() {
   const { currentUser, refreshUser } = useUser()
   const { tasks, completions, isCompleted, getLastCompletion, getUncompletedTasks, refetch } = useTasks()
   const { updateStreak } = useStreak()
+  const { date, isToday } = useDate()
   const { registerCompletion } = useCombo()
   const [xpEvents, setXpEvents] = useState<XpEvent[]>([])
 
@@ -50,7 +52,7 @@ export function Dashboard() {
     await supabase.from('completions').insert({
       task_id: taskId,
       user_id: currentUser.id,
-      completed_at: completedAt ? completedAt.toISOString() : new Date().toISOString(),
+      completed_at: completedAt ? completedAt.toISOString() : (isToday ? new Date().toISOString() : `${date}T12:00:00`),
       xp_earned: xpEarned,
       used_timer: usedTimer,
       timer_seconds: timerSeconds || null,

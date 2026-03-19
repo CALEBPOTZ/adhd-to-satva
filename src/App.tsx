@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { UserContext } from './hooks/useUser'
 import { ComboContext, getComboMultiplier, shouldResetCombo } from './hooks/useCombo'
+import { DateContext, getToday, getYesterday } from './hooks/useDate'
 import { playCombo } from './lib/sounds'
 import { runNotificationChecks, requestNotificationPermission } from './lib/notifications'
 import { startUpdateChecker } from './lib/updater'
@@ -43,6 +44,11 @@ function App() {
   })
   const [loading, setLoading] = useState(true)
   const [updateAvailable, setUpdateAvailable] = useState(false)
+
+  // Global date state
+  const [selectedDate, setSelectedDate] = useState(getToday())
+  const isToday = selectedDate === getToday()
+  const isYesterday = selectedDate === getYesterday()
 
   // Check for app updates
   useEffect(() => {
@@ -160,6 +166,13 @@ function App() {
   return (
     <UserContext.Provider value={{ currentUser, otherUser, switchUser, refreshUser }}>
       <ComboContext.Provider value={{ combo, lastCompletionTime, registerCompletion }}>
+        <DateContext.Provider value={{
+          date: selectedDate,
+          isToday,
+          isYesterday,
+          setToday: () => setSelectedDate(getToday()),
+          setYesterday: () => setSelectedDate(getYesterday()),
+        }}>
         <BrowserRouter basename="/adhd-to-satva">
           {updateAvailable && <UpdateBanner />}
           <div className="min-h-screen flex flex-col max-w-lg mx-auto">
@@ -171,6 +184,28 @@ function App() {
                 </h1>
                 <UserSwitcher />
               </div>
+              {/* Date selector */}
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => setSelectedDate(getToday())}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors
+                    ${isToday ? 'bg-accent text-bg' : 'bg-bg-elevated text-text-dim'}`}
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => setSelectedDate(getYesterday())}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors
+                    ${isYesterday ? 'bg-accent text-bg' : 'bg-bg-elevated text-text-dim'}`}
+                >
+                  Yesterday
+                </button>
+              </div>
+              {!isToday && (
+                <div className="text-center text-xs text-accent mt-1 font-medium">
+                  Viewing {selectedDate}
+                </div>
+              )}
               {combo >= 2 && (
                 <div className="mt-2">
                   <ComboMeter />
@@ -209,6 +244,7 @@ function App() {
             </nav>
           </div>
         </BrowserRouter>
+        </DateContext.Provider>
       </ComboContext.Provider>
     </UserContext.Provider>
   )

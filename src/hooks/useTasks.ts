@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase'
 import { getPeriodStart } from '../lib/periods'
 import type { Task, Completion } from '../types'
 import { useUser } from './useUser'
-
 export function useTasks() {
   const { currentUser } = useUser()
   const [tasks, setTasks] = useState<Task[]>([])
@@ -21,7 +20,7 @@ export function useTasks() {
     if (data) setTasks(data)
   }, [currentUser])
 
-  // Fetch completions from the last 60 days (covers bimonthly)
+  // Fetch completions from the last 60 days
   const fetchCompletions = useCallback(async () => {
     if (!currentUser) return
     const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000).toISOString()
@@ -39,7 +38,6 @@ export function useTasks() {
     Promise.all([fetchTasks(), fetchCompletions()]).then(() => setLoading(false))
   }, [currentUser, fetchTasks, fetchCompletions])
 
-  // Real-time completions
   useEffect(() => {
     if (!currentUser) return
     const channel = supabase
@@ -52,6 +50,7 @@ export function useTasks() {
   }, [currentUser, fetchCompletions])
 
   // Check if a task has been completed within its current period
+  // Uses the selected date context to determine the period
   const isCompletedThisPeriod = useCallback((task: Task) => {
     const periodStart = getPeriodStart(task.recurring)
     return completions.some(c =>
@@ -60,14 +59,12 @@ export function useTasks() {
     )
   }, [completions])
 
-  // Convenience: check by task ID (looks up the task first)
   const isCompleted = useCallback((taskId: string) => {
     const task = tasks.find(t => t.id === taskId)
     if (!task) return false
     return isCompletedThisPeriod(task)
   }, [tasks, isCompletedThisPeriod])
 
-  // Get the last completion date for a task
   const getLastCompletion = useCallback((taskId: string): Date | null => {
     const taskCompletions = completions
       .filter(c => c.task_id === taskId)
